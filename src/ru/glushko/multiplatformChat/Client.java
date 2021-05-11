@@ -2,21 +2,15 @@ package ru.glushko.multiplatformChat;
 
 import java.io.*;
 import java.net.Socket;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.Scanner;
 
 public class Client extends Thread
 {
-    private static String _ipAddress = "90.188.47.57";
     public static String _nickname;
-    private static Socket _clientSocket;
-    private static String _port;
     private static final Scanner _in = new Scanner(System.in);
     public static void main(String[] args)
     {
         String nicknameBuffer;
-        String ipAddressBuffer;
         String PORTBuffer;
 
         while(true)
@@ -33,20 +27,7 @@ public class Client extends Thread
                 System.out.println("Nickname is not correct!");
         }
 
-        /*while (true)
-        {
-            System.out.print("Enter IP Address: ");
-            ipAddressBuffer = _in.nextLine();
-
-            if (!ipAddressBuffer.isEmpty() && ipAddressBuffer.length() > 7)
-            {
-                _ipAddress = ipAddressBuffer;
-                break;
-            }
-            else
-                System.out.println("IPAddress is not correct!");
-        }*/
-
+        String socketPort;
         while (true)
         {
             System.out.print("Enter the port(1000 - 64000): ");
@@ -54,18 +35,21 @@ public class Client extends Thread
 
             if(!PORTBuffer.isEmpty() && PORTBuffer.length() > 3)
             {
-                _port = PORTBuffer;
+                socketPort = PORTBuffer;
                 break;
             }
         }
 
         try
         {
-            _clientSocket = new Socket(_ipAddress, Integer.parseInt(_port));
-            if(_clientSocket.isConnected())
+            String ipAddress = "90.188.47.57";
+            Socket clientSocket = new Socket(ipAddress, Integer.parseInt(socketPort));
+            if(clientSocket.isConnected())
                 System.out.println("Welcome to server, " + _nickname);
-            new Output(_clientSocket, _nickname);
-            new Input(_clientSocket);
+
+            new Input(clientSocket);
+            new Output(clientSocket, _nickname);
+
         }catch (Exception e)
         {
             System.out.println("\n\n\n\n");
@@ -78,25 +62,23 @@ public class Client extends Thread
 
 class Output extends Thread
 {
-    private Socket _socket;
-    private String _nickname;
+    private final Socket _clientSocket;
+    private String _clientNickname;
     private PrintWriter _writer;
     private Scanner _in;
 
-    public Output(Socket socket, String nickname) throws IOException
+    public Output(Socket clientSocket, String clientNickname) throws IOException
     {
-        this._socket = socket;
-        this._nickname = nickname;
-        _writer = new PrintWriter(new OutputStreamWriter(_socket.getOutputStream()), true);
+        _clientSocket = clientSocket;
+        _clientNickname = clientNickname;
+        _writer = new PrintWriter(new OutputStreamWriter(_clientSocket.getOutputStream()), true);
         _in = new Scanner(System.in);
-        output.start();
+        OutputThread.start();
     }
 
-    Thread output = new Thread(() ->
+    Thread OutputThread = new Thread(() ->
     {
-        Date date = new Date();
-        SimpleDateFormat formatForDateNow = new SimpleDateFormat("hh:mm:ss");
-        _writer.println(_nickname);
+        _writer.println(_clientNickname);
         while (true)
         {
             try
@@ -104,46 +86,49 @@ class Output extends Thread
                 String message = _in.nextLine();
                 if (message.equals("/disconnect"))
                 {
-                    _writer.println("/disconnect");
-                    Thread.sleep(1000);
-                    interrupt();
+                    disconnectFromServer();
                     break;
                 }
-                _writer.println(formatForDateNow.format(date) + "/" + _nickname + ": " + message);
+                sendMessage(message);
                 Thread.sleep(135);
-            } catch (Exception e)
-            {
-                e.printStackTrace();
-            }
+            } catch (Exception e) { e.printStackTrace(); }
         }
     });
+
+    private void disconnectFromServer() throws InterruptedException, IOException
+    {
+        _writer.println("/disconnect");
+        Thread.sleep(700);
+        _clientSocket.close();
+        _writer.close();
+        interrupt();
+    } //Метод отключения от сервера.
+
+    private void sendMessage(String message)
+    {
+        _writer.println(message);
+    } //Метод отправки сообщений.
 }
 
 class Input extends Thread
 {
-    private Socket _socket;
     private BufferedReader _reader;
-    private String _clientMessage;
 
-    public Input(Socket socket) throws IOException
+    public Input(Socket clientSocket) throws IOException
     {
-        this._socket = socket;
-        _reader = new BufferedReader(new InputStreamReader(_socket.getInputStream()));
-        input.start();
+        _reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+        InputThread.start();
     }
 
-    Thread input = new Thread(() ->
+    Thread InputThread = new Thread(() ->
     {
         try
         {
-            while ((_clientMessage = _reader.readLine()) != null )
+            String clientMessage;
+            while ((clientMessage = _reader.readLine()) != null)
             {
-                System.out.println(_clientMessage);
+                System.out.println(clientMessage);
             }
-        }catch (IOException e)
-        {
-            e.printStackTrace();
-        }
+        }catch (IOException e) { e.printStackTrace(); }
     });
 }
-
