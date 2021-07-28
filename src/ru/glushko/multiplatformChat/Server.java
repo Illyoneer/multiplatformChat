@@ -14,34 +14,35 @@ public class Server
     private static final Set<String> _clientNicknames = _clientsList.keySet();
 
     @SuppressWarnings("InfiniteLoopStatement")
-    public static void main (String[] args) throws IOException
+    public static void main(String[] args) throws IOException
     {
         int PORT;
-        while(true)
+        while (true)
         {
-            try{
+            try
+            {
                 System.out.print("Enter the port(1000 - 64000): ");
                 PORT = _in.nextInt();
                 break;
-            }catch (Exception e) { e.printStackTrace(); }
+            } catch (Exception e) { e.printStackTrace(); }
         }
 
-        ServerSocket _serverSocket = new ServerSocket(PORT);//Создание серверного сокета.
-        System.out.println("Server started on port: " + PORT);
+        ServerSocket serverSocket = new ServerSocket(PORT);//Создание серверного сокета.
+        System.out.println("Server started on port: " + PORT + ".");
 
         while (true)
         {
             try
             {
-                Socket _clientSocket = _serverSocket.accept(); //Создание клиентского сокета и начало ожидания подключений.
-                BufferedReader _reader = new BufferedReader(new InputStreamReader(_clientSocket.getInputStream()));
-                PrintWriter _writer = new PrintWriter(new OutputStreamWriter(_clientSocket.getOutputStream()), true);
-                _clientNickname = _reader.readLine(); //Получение никнейма пользователя.
-                //TODO: Добавить проверку на существующий никнейм и проверку на пустой никнейм.
-                _clientsList.put(_clientNickname, _writer); //Добавление пользователя и поток записи в список.
+                Socket clientSocket = serverSocket.accept(); //Создание клиентского сокета и начало ожидания подключений.
+                BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                PrintWriter printWriter = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()), true);
+                _clientNickname = bufferedReader.readLine(); //Получение никнейма пользователя.
+                //TODO: Добавить проверку на существующий никнейм.
+                _clientsList.put(_clientNickname, printWriter); //Добавление пользователя и поток записи в список.
                 showUsers(); //Метод отображения списка подключившихся пользователей.
 
-                new UsersCommander(_clientSocket, _clientNickname, _writer); //Создание экземляра управляющего класса и запуск потока обработки сообщений.
+                new UsersManipulator(clientSocket, _clientNickname, printWriter); //Создание экземляра управляющего классом и запуск потока обработки сообщений.
                 System.out.println(_clientNickname + " joined the server!"); //Отладочная информация в консоль сервера.
 
             } catch (IOException | InterruptedException e) { e.printStackTrace(); }
@@ -74,16 +75,15 @@ public class Server
 
     public static synchronized void showUsers() throws InterruptedException
     {
-        broadcastMessageToAllClients(_clientNickname + " joined the server!");
+        broadcastMessageToAllClients(_clientNickname + " connected to the server!");
         Thread.sleep(135);
-        broadcastMessageToAllClients("\n");
+        broadcastMessageToAllClients("       ");
         broadcastMessageToAllClients("CLIENTS LIST: ");
         for (String name : _clientNicknames)
         {
             broadcastMessageToAllClients(name.trim());
-            Thread.sleep(135);
         }
-        broadcastMessageToAllClients("\n");
+        broadcastMessageToAllClients("       ");
     } //Метод отображения списка подключившихся пользователей.
 
     public static void removeClient(String nickname, PrintWriter writer)
@@ -92,52 +92,56 @@ public class Server
     } //Метод удаления из списка подключившихся пользователей.
 }
 
-class UsersCommander extends Thread
+class UsersManipulator extends Thread
 {
     private final Socket _commanderClientSocket;
-    private BufferedReader _commanderReader;
-    private PrintWriter _commanderWriter;
+    private BufferedReader _commanderBufferedReader;
+    private PrintWriter _commanderPrintWriter;
     private String _clientNickname;
 
-    public UsersCommander(Socket clientSocket, String clientNickname, PrintWriter serverWriter) throws IOException
+    public UsersManipulator(Socket clientSocket, String clientNickname, PrintWriter serverWriter) throws IOException
     {
         _commanderClientSocket = clientSocket;
         _clientNickname = clientNickname;
-        _commanderReader = new BufferedReader(new InputStreamReader(_commanderClientSocket.getInputStream()));
-        _commanderWriter = serverWriter;
-        ReceiverThread.start();
+        _commanderBufferedReader = new BufferedReader(new InputStreamReader(_commanderClientSocket.getInputStream()));
+        _commanderPrintWriter = serverWriter;
+        MessageForwarderThread.start();
     }
 
-    Thread ReceiverThread = new Thread(() -> {
+    Thread MessageForwarderThread = new Thread(() ->
+    {
         try
         {
             Date date = new Date();
             SimpleDateFormat formatForDateNow = new SimpleDateFormat("hh:mm:ss");
-            String _clientMessage;
-            while ((_clientMessage = _commanderReader.readLine()) != null)
+            String clientMessage;
+            while ((clientMessage = _commanderBufferedReader.readLine()) != null)
             {
-                if (_clientMessage.equals("/disconnect"))
+                if (clientMessage.equals("/disconnect"))
                 {
                     interrupt();
                     break; //Завершение цикла.
                 }
-                Server.broadcastMessageByWriterFilter("\r" + formatForDateNow.format(date) + "/" + _clientNickname + ": " + _clientMessage, _commanderWriter); //Отправка сообщения всем пользователям.
+                if (clientMessage.length() > 0)
+                    Server.broadcastMessageByWriterFilter(formatForDateNow.format(date) + "/" + _clientNickname + ": " + clientMessage,
+                            _commanderPrintWriter); //Отправка сообщения всем пользователям кроме отправителя.
                 Thread.sleep(135);
-                System.out.println(formatForDateNow.format(date) + "/" + _clientNickname + ": " + _clientMessage);
+                System.out.println(formatForDateNow.format(date) + "/" + _clientNickname + ": " + clientMessage);
             }
-        }catch(IOException | InterruptedException e) { e.printStackTrace(); }finally { try { disconnectFromServer(); } catch (InterruptedException | IOException e) { e.printStackTrace(); } }
+        } catch (IOException | InterruptedException e) { e.printStackTrace(); }
+        finally { try { disconnectFromServer(); } catch (InterruptedException | IOException e) { e.printStackTrace(); } }
     });
 
     private void disconnectFromServer() throws InterruptedException, IOException
     {
         Server.broadcastMessageToAllClients(_clientNickname + " disconnected.");
         System.out.println(_clientNickname + " disconnected.");
-        Server.removeClient(_clientNickname, _commanderWriter); //Удаление клиента из списка.
-        if(!_commanderClientSocket.isClosed()) //Проверка на закрытый сокет.
+        Server.removeClient(_clientNickname, _commanderPrintWriter); //Удаление клиента из списка.
+        if (!_commanderClientSocket.isClosed()) //Проверка на закрытый сокет.
             _commanderClientSocket.close(); //Закрытие сокета.
-        _commanderWriter.close(); //Закрытие потока на запись.
-        _commanderReader.close(); //Закрытие потока на чтение.
-        if(ReceiverThread.isAlive()) //Проверка на жизнь потока.
+        _commanderPrintWriter.close(); //Закрытие потока на запись.
+        _commanderBufferedReader.close(); //Закрытие потока на чтение.
+        if (MessageForwarderThread.isAlive()) //Проверка на жизнь потока.
             interrupt();
     } //Метод отключения от сервера.
 }
